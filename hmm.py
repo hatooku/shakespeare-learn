@@ -154,7 +154,8 @@ class HMM:
 
         # Compute Xi's
         for j in range(len(X)): # iterate over all sequences
-            seq_len = len(X[j])
+            seq = X[j]
+            seq_len = len(seq)
             alphas = alphas_arr[j]
             betas = betas_arr[j]
 
