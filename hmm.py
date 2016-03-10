@@ -53,17 +53,20 @@ class HMM:
     def registerObs(self, data):
         # Reset Variables
         self.D = 0
-        self.token_dict = {}
+        token_to_num = {}
 
         X = [] # data transformed into integers corresponding to tokens
         for seq in data:
             X_i = [] # this sequence transformed into integers
             for token in seq:
-                if token not in self.token_dict:
-                    self.token_dict[token] = self.D
+                if token not in token_to_num:
+                    token_to_num[token] = self.D
                     self.D += 1
-                X_i.append(self.token_dict[token])
+                X_i.append(token_to_num[token])
             X.append(X_i)
+
+        self.token_dict = {v: k for k, v in token_to_num.items()}
+
         return X
 
     """ Makes all rows add up to 1 """
