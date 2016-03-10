@@ -16,11 +16,13 @@ class HMM:
     def train(self, data, epsilon=0.001, scaling=True):
         X = self.registerObs(data)
 
+        L = self.L
+        D = self.D
+
         # Initialize Matrices
         self.A = self.normalize(np.random.rand(L, L))
         self.PI = self.normalize(np.random.rand(L))
         self.O = self.normalize(np.random.rand(L, D))
-
 
         norm_arr = []
         iterations = 0
@@ -28,25 +30,23 @@ class HMM:
         while (True):
             iterations += 1
             # E Step
-            alphas_arr = []
-            betas_arr = []
-            for seq in X:
-                alphas, betas = self.forwardBackward(seq, scaling)
-                alphas_arr.append(alphas)
-                betas_arr.append(betas)
+            gamma_arr, xi_arr = self.computeMarginals(X, scaling)
 
             # M step (Computes marginals + Updates)
-            change_norm = self.update(X, alphas_arr, betas_arr)
+            change_norm = self.update(X, gamma_arr, xi_arr)
+            print change_norm
             norm_arr.append(change_norm)
 
             # Stopping Condition
             if len(norm_arr) > 1 and norm_arr[-1] / norm_arr[0] < epsilon:
-                print iterations
+                print "iterations:", iterations
                 break
 
-        print h.PI
-        print h.A
-        print h.O
+        print self.PI
+        print self.A
+        print self.O
+
+        return (self.token_dict, self.PI, self.A, self.O)
 
     """ Registers observations as integers and returns data transformed into
     integers. """
@@ -119,7 +119,64 @@ class HMM:
 
         return (alphas, betas)
 
-    def update(self, X, alphas_arr, betas_arr):
+    def computeMarginals(self, X, scaling=True):
+        # Calculate alphas and betas for all sequences
+        L = self.L
+        alphas_arr = []
+        betas_arr = []
+        for seq in X:
+            alphas, betas = self.forwardBackward(seq, scaling)
+            alphas_arr.append(alphas)
+            betas_arr.append(betas)
+        # P(y_i = z)
+        gamma_arr = [] # Indexed by: # Sequence, Position, State
+
+        # P(y_i = prev, y_i+1 = next)
+        xi_arr = [] # Indexed by: # Sequence, Position of Prev, Prev, Next
+
+        # Compute Gammas
+        for j in range(len(X)): # iterate over all sequences
+            seq_len = len(X[j])
+            alphas = alphas_arr[j]
+            betas = betas_arr[j]
+
+            # gammas for this sequence
+            gamma = np.zeros((seq_len, L))
+
+            for i in range(seq_len):
+                for state in range(L):
+                    # just numerator
+                    gamma[i, state] = alphas[i, state] * betas[i, state]
+                # divide by denominator
+                gamma[i] = gamma[i] / gamma[i].sum()
+
+            gamma_arr.append(gamma)
+
+        # Compute Xi's
+        for j in range(len(X)): # iterate over all sequences
+            seq_len = len(X[j])
+            alphas = alphas_arr[j]
+            betas = betas_arr[j]
+
+            # xi's for this sequence
+            xi = np.zeros((seq_len-1, L, L))
+
+            for i in range(seq_len-1):
+                for prev in range(L):
+                    for next in range(L):
+                        # just numerator
+                        xi[i, prev, next] = alphas[i, prev] * \
+                                            self.O[next, seq[i+1]] * \
+                                            self.A[prev, next] * \
+                                            betas[i+1, next]
+                # divide by denominator
+                xi[i] = xi[i] / xi[i].sum()
+
+            xi_arr.append(xi)
+
+        return (gamma_arr, xi_arr)
+
+    def update(self, X, gamma_arr, xi_arr):
         L = self.L # num states
         D = self.D # num unique tokens
 
@@ -128,45 +185,16 @@ class HMM:
         A = np.zeros(self.A.shape)
         O = np.zeros(self.O.shape)
 
-        # update O (emission matrix)
-        for state in range(L):
-            for token in range(D):
-                numerator = 0
-                denominator = 0
-                for j in range(len(X)): # iterate over all sequences
-                    seq = X[j]
-                    alphas = alphas_arr[j]
-                    betas = betas_arr[j]
-
-                    # for each index in seq
-                    for i in range(len(seq)):
-                        # compute P(y_i = z)
-                        top = alphas[i, state] * betas[i, state]
-                        bot = alphas[i].dot(betas[i])
-                        prob = top / bot
-
-                        if seq[i] == token: # indicator function
-                            numerator += prob
-                        denominator += prob
-                O[state, token] = numerator / denominator
-
-        # Make sure numbers add up to 1
-        O = self.normalize(O)
-
         # update PI (initial distribution matrix)
         for state in range(L):
             prob_sum = 0
             for j in range(len(X)): # iterate over all sequences
-                seq = X[j]
-                alphas = alphas_arr[j]
-                betas = betas_arr[j]
+                prob_sum += gamma_arr[j][0, state]
 
-                # compute P(y_0 = state)
-                prob_sum += alphas[0, state] * betas[0, state] / \
-                            alphas[0].dot(betas[0])
-            PI[state] = prob_sum / len(X)
+            PI[state] = prob_sum / len(X) # average across sequences
+
         # Make sure numbers add up to 1
-        PI = self.normalize(PI)
+        np.testing.assert_almost_equal(PI.sum(), 1)
 
         # Update A (transition matrix)
         for prev in range(L):
@@ -175,42 +203,38 @@ class HMM:
                 denominator = 0
 
                 for j in range(len(X)): # iterate over all sequences
-                    seq = X[j]
-                    alphas = alphas_arr[j]
-                    betas = betas_arr[j]
-
                     # for each index in seq excluding last index
-                    for i in range(len(seq)-1):
-                        # Compute P(y_i = prev, y_i+1 = next) and add to
-                        # numerator
-                        # Names: numerator_top, numerator_bottom
-                        num_top = alphas[i, prev] * self.O[next, seq[i+1]] * \
-                               self.A[prev, next] * betas[i+1, next]
-                        num_bot = 0
-                        # SHOULD BE PRECOMPUTED (FIX LATER)
-                        for prev_state in range(L):
-                            for next_state in range(L):
-                                num_bot += alphas[i, prev_state] * \
-                                        self.O[next_state, seq[i+1]] * \
-                                        self.A[prev_state, next_state] * \
-                                        betas[i+1, next_state]
-                        numerator += num_top / num_bot
+                    for i in range(len(X[j])-1):
 
-                        # Compute P(y_i = b) and add to denominator
-                        # Names: denominator_top, denominator_bottom
-                        denom_top = alphas[i, prev] * betas[i, prev]
-                        denom_bot = alphas[i].dot(betas[i])
-
-                        denominator += denom_top / denom_bot
+                        numerator += xi_arr[j][i, prev, next]
+                        denominator += gamma_arr[j][i, prev]
 
                 # UPDATE A_{prev, next}
                 A[prev, next] = numerator / denominator
 
-        # Make sure numbers add up to 1
-        A = self.normalize(A)
+            # Make sure rows add up to 1
+            np.testing.assert_almost_equal(A[prev].sum(), 1)
 
-        # Calculate norm of change
-        # Frobenius norm of the differences between update and previous matrices
+        # update O (emission matrix)
+        for state in range(L):
+            for token in range(D):
+                numerator = 0
+                denominator = 0
+
+                for j in range(len(X)): # iterate over all sequences
+                    for i in range(len(X[j])): # for each index in seq
+                        prob = gamma_arr[j][i, state]
+
+                        if X[j][i] == token: # indicator function
+                            numerator += prob
+                        denominator += prob
+
+                O[state, token] = numerator / denominator
+
+            # Make sure rows add up to 1
+            np.testing.assert_almost_equal(O[state].sum(), 1)
+
+        # frobenius norm of the differences between update and previous matrices
         change_norm = np.linalg.norm(self.A - A) + np.linalg.norm(self.O - O) \
                       + np.linalg.norm(self.PI - PI)
 
@@ -228,7 +252,7 @@ if testing:
     h = HMM(2)
     print "\n"
     data = [['R', 'W', 'B', 'B']]
-    h.train(data, scaling=True)
+    h.train(data)
 """
 # For testing, use these initial matrices (for Rochester example)
 self.A = np.array([[.6, .4], [.3, .7]])
