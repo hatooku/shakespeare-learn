@@ -1,4 +1,6 @@
 import numpy as np
+from multiprocessing import Pool
+import time
 
 class HMM:
 
@@ -13,7 +15,7 @@ class HMM:
         self.PI = None # initial state distribution, 0-indexed
         self.O = None # observation (row: state; col: observation), 0-indexed
 
-    def train(self, data, epsilon=0.001, scaling=True):
+    def train(self, data, epsilon=0.001):
         X = self.registerObs(data)
 
         L = self.L
@@ -28,14 +30,16 @@ class HMM:
         iterations = 0
 
         while (True):
+            starttime = time.time()
             iterations += 1
             # E Step
-            gamma_arr, xi_arr = self.computeMarginals(X, scaling)
+            gamma_arr, xi_arr = self.computeMarginals(X)
 
             # M step (Computes marginals + Updates)
             change_norm = self.update(X, gamma_arr, xi_arr)
             print change_norm
             norm_arr.append(change_norm)
+            print("--- %s seconds ---" % (time.time() - starttime))
 
             # Stopping Condition
             if len(norm_arr) > 1 and norm_arr[-1] / norm_arr[0] < epsilon:
@@ -77,33 +81,58 @@ class HMM:
         sums = matrix.sum(axis=1)
         return matrix / sums.reshape(sums.shape[0], 1)
 
-    def forwardBackward(self, seq, scaling=True):
+    def forwardBackward(self, seq):
         """ This function computes alpha and beta values for a sequence
             using the Forward-Backward algorithm.
         """
         M = len(seq) # length of given sequence
         L = self.L # num of states
 
-        alphas = np.zeros((M, L)) # row: position; col: state
-        betas = np.zeros((M, L)) # row: position; col: state
+        #fbPool = Pool()
 
+        # FORWARD ALGORITHM
+        alphas = self.forward(seq)
+        #alphas = fbPool.apply(unwrap_self_forward, args=([(self, seq)]))
+        # BACKWARD ALGORITHM
+        betas = self.backward(seq)
+        #betas = fbPool.apply(unwrap_self_backward, args=([(self, seq)]))
+
+        #fbPool.close()
+        #fbPool.join()
+
+        return (alphas, betas)
+
+    """ Runs the Forward Algorithm.
+        @param i : index
+        @param s : state
+    """
+    def forward(self, seq):
+        M = len(seq)
+        L = self.L
+        alphas = np.zeros((M, L)) # row: position; col: state
         # FORWARD ALGORITHM
         for i in range(M): # For each observation
             for s in range(L): # For each state
                 # Base case
                 if i == 0:
-                    alphas[i, s] = self.O[s, seq[0]] * self.PI[s]
+                    alphas[i, s] = self.O[s, seq[i]] * self.PI[s]
                 else:
                     sum = 0
                     # For each previous state
-                    for prev in range(L):
+                    for prev in range(self.L):
                         sum += alphas[i-1, prev] * self.A[prev, s]
                     alphas[i, s] = sum * self.O[s, seq[i]]
-            # Scaling
-            if scaling:
-                scale = np.sum(alphas[i])
-                alphas[i] = alphas[i] / scale
+        alphas = self.normalize(alphas)
+        return alphas
 
+    """ Runs the Backward Algorithm.
+        @param i : token
+        @param s : state
+    """
+    def backward(self, seq):
+        M = len(seq)
+        L = self.L
+        betas = np.zeros((M, L)) # row: position; col: state
         # BACKWARD ALGORITHM
         for i in reversed(range(M)): # For each observation
             for s in range(L): # For each state
@@ -112,31 +141,42 @@ class HMM:
                     betas[i, s] = 1
                 else:
                     # For each next state
-                    for next in range(L):
+                    for next in range(self.L):
                         betas[i, s] += betas[i+1, next] * \
                                        self.A[s, next] * self.O[next, seq[i+1]]
-            # Scaling
-            if scaling:
-                scale = np.sum(betas[i])
-                betas[i] = betas[i] / scale
+        betas = self.normalize(betas)
+        return betas
 
-        return (alphas, betas)
-
-    def computeMarginals(self, X, scaling=True):
+    def computeMarginals(self, X):
         # Calculate alphas and betas for all sequences
         L = self.L
         alphas_arr = []
         betas_arr = []
         for seq in X:
-            alphas, betas = self.forwardBackward(seq, scaling)
+            alphas, betas = self.forwardBackward(seq)
             alphas_arr.append(alphas)
             betas_arr.append(betas)
-        # P(y_i = z)
+
+
+
+        mgPool = Pool()
+
+        gamma_arr = mgPool.apply_async(unwrap_self_gamma,
+                                 args=([(self, X, alphas_arr, betas_arr)])).get()
+        xi_arr = mgPool.apply_async(unwrap_self_xi,
+                                 args=([(self, X, alphas_arr, betas_arr)])).get()
+
+        mgPool.close()
+        mgPool.join()
+
+        #gamma_arr = self.computeGammas(X, alphas_arr, betas_arr)
+        #xi_arr = self.computeXis(X, alphas_arr, betas_arr)
+
+        return (gamma_arr, xi_arr)
+
+    def computeGammas(self, X, alphas_arr, betas_arr):
         gamma_arr = [] # Indexed by: # Sequence, Position, State
-
-        # P(y_i = prev, y_i+1 = next)
-        xi_arr = [] # Indexed by: # Sequence, Position of Prev, Prev, Next
-
+        L = self.L
         # Compute Gammas
         for j in range(len(X)): # iterate over all sequences
             seq_len = len(X[j])
@@ -154,6 +194,13 @@ class HMM:
                 gamma[i] = gamma[i] / gamma[i].sum()
 
             gamma_arr.append(gamma)
+
+        return gamma_arr
+
+    def computeXis(self, X, alphas_arr, betas_arr):
+        L = self.L
+        # P(y_i = prev, y_i+1 = next)
+        xi_arr = [] # Indexed by: # Sequence, Position of Prev, Prev, Next
 
         # Compute Xi's
         for j in range(len(X)): # iterate over all sequences
@@ -178,7 +225,7 @@ class HMM:
 
             xi_arr.append(xi)
 
-        return (gamma_arr, xi_arr)
+        return xi_arr
 
     def update(self, X, gamma_arr, xi_arr):
         L = self.L # num states
@@ -198,7 +245,7 @@ class HMM:
             PI[state] = prob_sum / len(X) # average across sequences
 
         # Make sure numbers add up to 1
-        np.testing.assert_almost_equal(PI.sum(), 1)
+        #np.testing.assert_almost_equal(PI.sum(), 1)
 
         # Update A (transition matrix)
         for prev in range(L):
@@ -217,7 +264,7 @@ class HMM:
                 A[prev, next] = numerator / denominator
 
             # Make sure rows add up to 1
-            np.testing.assert_almost_equal(A[prev].sum(), 1)
+            #np.testing.assert_almost_equal(A[prev].sum(), 1)
 
         # update O (emission matrix)
         for state in range(L):
@@ -236,7 +283,7 @@ class HMM:
                 O[state, token] = numerator / denominator
 
             # Make sure rows add up to 1
-            np.testing.assert_almost_equal(O[state].sum(), 1)
+            #np.testing.assert_almost_equal(O[state].sum(), 1)
 
         # frobenius norm of the differences between update and previous matrices
         change_norm = np.linalg.norm(self.A - A) + np.linalg.norm(self.O - O) \
@@ -249,18 +296,32 @@ class HMM:
 
         return change_norm
 
-# Testing
-testing = True
-# Rochester example
-if testing:
-    h = HMM(2)
-    print "\n"
-    data = [['R', 'W', 'B', 'B']]
-    h.train(data)
-"""
-# For testing, use these initial matrices (for Rochester example)
-self.A = np.array([[.6, .4], [.3, .7]])
-self.PI = np.array([.8, .2])
-self.O = np.array([[.3, .4, .3], [.4, .3, .3]])
-print "A:\n", self.A
-print "O:\n", self.O """
+
+def unwrap_self_forward(arg, **kwarg):
+    return HMM.forward(*arg, **kwarg)
+
+def unwrap_self_backward(arg, **kwarg):
+    return HMM.backward(*arg, **kwarg)
+
+def unwrap_self_gamma(arg, **kwarg):
+    return HMM.computeGammas(*arg, **kwarg)
+
+def unwrap_self_xi(arg, **kwarg):
+    return HMM.computeXis(*arg, **kwarg)
+
+if __name__ == '__main__':
+    # Testing
+    testing = True
+    # Rochester example
+    if testing:
+        h = HMM(2)
+        print "\n"
+        data = [['R', 'W', 'B', 'B']]
+        h.train(data)
+    """
+    # For testing, use these initial matrices (for Rochester example)
+    self.A = np.array([[.6, .4], [.3, .7]])
+    self.PI = np.array([.8, .2])
+    self.O = np.array([[.3, .4, .3], [.4, .3, .3]])
+    print "A:\n", self.A
+    print "O:\n", self.O """
