@@ -249,18 +249,20 @@ class HMM:
 
         return change_norm
 
-# Testing
-testing = True
-# Rochester example
-if testing:
-    h = HMM(2)
-    print "\n"
-    data = [['R', 'W', 'B', 'B']]
-    h.train(data)
-"""
-# For testing, use these initial matrices (for Rochester example)
-self.A = np.array([[.6, .4], [.3, .7]])
-self.PI = np.array([.8, .2])
-self.O = np.array([[.3, .4, .3], [.4, .3, .3]])
-print "A:\n", self.A
-print "O:\n", self.O """
+
+if __name__ == '__main':
+    # Testing
+    testing = True
+    # Rochester example
+    if testing:
+        h = HMM(2)
+        print "\n"
+        data = [['R', 'W', 'B', 'B']]
+        h.train(data)
+    """
+    # For testing, use these initial matrices (for Rochester example)
+    self.A = np.array([[.6, .4], [.3, .7]])
+    self.PI = np.array([.8, .2])
+    self.O = np.array([[.3, .4, .3], [.4, .3, .3]])
+    print "A:\n", self.A
+    print "O:\n", self.O """
