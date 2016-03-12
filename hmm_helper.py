@@ -1,3 +1,4 @@
+from hmm import HMM
 import numpy as np
 import pickle
 
@@ -243,3 +244,12 @@ def load_syll_stress_dicts():
     stress_file.close()
     
     return syll_dict, stress_dict
+    
+# ----------------------------------------------------------------------
+# Train and save models.
+# ----------------------------------------------------------------------
+def train_model(model_name, num_states, data):
+    hmm = HMM(num_states)
+    wordmap, init, trans, emiss = hmm.train(data, epsilon=0.01)
+    save_model(model_name, trans, emiss, wordmap, init)
+    
