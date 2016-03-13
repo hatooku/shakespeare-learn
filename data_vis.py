@@ -5,8 +5,8 @@ import hmm_helper as base
 # Normalize data
 def norm_emiss(emiss, wordmap, wordcount):
     for x in range(len(emiss)):
-        for y in range(len(row)):
-            word = wordcount[y]
+        for y in range(len(emiss[x])):
+            word = wordmap[y]
             freq = wordcount[word]
             emiss[x][y] = emiss[x][y]/freq
     return emiss
@@ -54,12 +54,13 @@ def clean_print_trans(ans):
     print "Top Transitions"
     print "-"*40
     for x in range(len(ans)):
-        print "State %d --> %d, prob %0.3f" %(x+1, ans[x][0], ans[x][1])
+        print "State %d --> %d, prob %0.3f" %(x+1, ans[x][0]+1, ans[x][1])
 
 
-trans, emiss, wordmap, init = base.load_model("10-state-quatrains")
-d = find_best(emiss, wordmap)
-# clean_print_top(d)
+trans, emiss, wordmap, init = base.load_model("10-state-rev-lines")
+count = base.gen_count_dict()
+d = find_best(emiss, wordmap, count)
+clean_print_top(d)
 
 ans = trans_max(trans)
 clean_print_trans(ans)
