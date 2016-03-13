@@ -259,6 +259,11 @@ def post_process(line):
     for i in range(len(tmp)):
         if tmp[i] == 'i':
             tmp[i] = 'I'
+    # Capitalize first word of sentences.
+    for i in range(len(tmp) - 1, 0, -1):
+        prev = tmp[i - 1]
+        if prev[len(prev) - 1] in ['!', '.', '?']:
+            tmp[i] = tmp[i].capitalize()
     return ' '.join(tmp)
     
 # Generates a line with a seeded last word. (Omit stress consideration.)

@@ -22,11 +22,14 @@ def gpoem_qac_models(model_name):
 #     do not necessarily follow the iambic pentameter stressing. Takes in 
 #     reversed models trained on a per-line sequencing. The valid models for
 #     this poem generation are as follows:
-#         1. 20-state-rev-lines
-#         2. 30-state-rev-lines
-#         3. 50-state-rev-lines
-#         4. 75-state-rev-lines
-#         5. 100-state-rev-lines
+#         1. 5-state-rev-lines
+#         2. 8-state-rev-lines
+#         3. 10-state-rev-lines
+#         4. 20-state-rev-lines
+#         5. 30-state-rev-lines
+#         6. 50-state-rev-lines
+#         7. 75-state-rev-lines
+#         8. 100-state-rev-lines
 def gpoem_rev_models(model_name):
     trans, emiss, wm, init = hh.load_model(model_name)
     inv_wm = {v: k for k, v in wm.items()}
