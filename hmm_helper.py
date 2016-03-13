@@ -144,13 +144,35 @@ def shksp_quatrain_couplets_line(tokenizer, filename='shakespeare.txt'):
             cursor += 1
     return quatrains, couplets
     
+def gen_rhyme_lists(filename='shakespeare.txt'):
+    raw = shksp_raw(filename)
+    quatrains_rhymes = []
+    couplets_rhymes = []
+    cursor = 0
+    for sonnet in range(NUM_SHKSP_SONNETS):
+        cursor += 1
+        for quatrain in range(NUM_QUATRAINS):
+            line0 = simple_token2(raw[cursor])
+            line1 = simple_token2(raw[cursor + 1])
+            line2 = simple_token2(raw[cursor + 2])
+            line3 = simple_token2(raw[cursor + 3])
+            quatrains_rhymes.append((line0[-1], line2[-1]))
+            quatrains_rhymes.append((line1[-1], line3[-1]))
+            cursor += 4
+        line0 = simple_token2(raw[cursor])
+        line1 = simple_token2(raw[cursor + 1])
+        couplets_rhymes.append((line0[-1], line1[-1]))
+        cursor += 2
+    return quatrains_rhymes, couplets_rhymes
+    
 # ----------------------------------------------------------------------
 # Generate from trained models.
 # ----------------------------------------------------------------------
 # Length is number of syllables to generate. (Generally 10)
+# Generates a line using a init vector to choose start state.
 def gen_txt(trans, emiss, init, word_map, 
             syll_dict, stress_dict, length=10, 
-            space_symb=' '):
+            space_symb=' ', curr_state=None):
     # Verify that the model is functional and setup.
     num_states = len(trans)
     num_words = len(emiss[0])
@@ -159,7 +181,8 @@ def gen_txt(trans, emiss, init, word_map,
     
     # Prepare to iterate for words.
     build = ''
-    curr_state = np.random.choice(num_states, p=init)
+    if curr_state is None:
+        curr_state = np.random.choice(num_states, p=init)
     curr_length = 0
     curr_stress = 0
     
@@ -167,14 +190,13 @@ def gen_txt(trans, emiss, init, word_map,
     while curr_length < length:
         # Select random word based on emission matrix.
         nxt_token = int(np.random.choice(num_words, p=emiss[int(curr_state)]))
-        word = word_map[nxt_token].rstrip('.,?!;:()')
-        print word
+        word = word_map[nxt_token].rstrip('.,?!;:()').lstrip('(')
+        # print word
         
         # Check that word isn't too long and is stressed correctly.
         while (syll_dict[word] + curr_stress > length) or (stress_dict[word] != curr_stress):
                 nxt_token = int(np.random.choice(num_words, p=emiss[int(curr_state)]))
                 word = word_map[nxt_token].rstrip('.,?!;:()').lstrip('(')
-                print word
         
         build += word_map[nxt_token] + space_symb
         curr_length += syll_dict[word]
@@ -182,7 +204,131 @@ def gen_txt(trans, emiss, init, word_map,
         
         # Go to next state.
         curr_state = np.random.choice(num_states, p=trans[int(curr_state)])
+    return build, curr_state
+
+def count_syllables_stress(line, syll_dict, stress_dict):
+    count = 0
+    stress = True
+    curr_stress = 0
+    words = simple_token2(line)
+    for word in words:
+        word = word.rstrip('.,?!;:()').lstrip('(')
+        count += syll_dict[word]
+        if stress_dict[word] != curr_stress:
+            stress = False
+        curr_stress = (curr_stress + syll_dict[word]) % 2
+    return count, stress
+    
+# Generates a line with a seeded last word. (Omit stress consideration.)
+# Requires both maps, int->word and word->int.
+def gen_txt_rhyme1(trans, emiss, wti_map, itw_map, syll_dict, stress_dict,
+                  seed, length=10):
+    # Verify that the model is functional and setup.
+    num_states = len(trans)
+    num_words = len(emiss[0])
+    assert (num_states == len(trans[0])), 'Transition matrix is not square.'
+    assert (num_states == len(emiss)), 'Emission matrix not correct dimensions.'
+    
+    # Find most likely state to emit seed.
+    token_num = wti_map[seed]
+    best_state = np.argmax(emiss[:, token_num])
+    build = seed
+    # Transpose transition matrix since we are building line backwards.
+    ttrans = np.transpose(trans)
+    while count_syllables_stress(build, syll_dict, stress_dict) != (10, True):
+        curr_state = best_state
+        build = seed
+        while count_syllables_stress(build, syll_dict, stress_dict)[0] < 10:
+            nxt_token = int(np.random.choice(num_words, p=emiss[int(curr_state)]))
+            word = itw_map[nxt_token]
+            build = word + ' ' + build
+            # Go to next state.
+            curr_state = np.random.choice(num_states, 
+                                          p=ttrans[int(curr_state)] / np.sum(ttrans[int(curr_state)]))
     return build
+    
+# Generates a line with a seeded last word. Assumes that the model was trained
+# backwards.
+# Requires both maps, int->word and word->int.
+def gen_txt_rhyme2(trans, emiss, wti_map, itw_map, syll_dict, stress_dict,
+                  seed, length=10):
+    # Verify that the model is functional and setup.
+    num_states = len(trans)
+    num_words = len(emiss[0])
+    assert (num_states == len(trans[0])), 'Transition matrix is not square.'
+    assert (num_states == len(emiss)), 'Emission matrix not correct dimensions.'
+    
+    # Find most likely state to emit seed.
+    token_num = wti_map[seed]
+    best_state = np.argmax(emiss[:, token_num])
+    build = seed
+    while count_syllables_stress(build, syll_dict, stress_dict)[0] != 10:
+        curr_state = best_state
+        build = seed
+        while count_syllables_stress(build, syll_dict, stress_dict)[0] < 10:
+            # Go to next state.
+            curr_state = np.random.choice(num_states, p=trans[int(curr_state)])
+            nxt_token = int(np.random.choice(num_words, p=emiss[int(curr_state)]))
+            word = itw_map[nxt_token]
+            build = word + ' ' + build
+    return build
+
+# Generates an un-rhymed poem.
+def gen_poem(q_trans, q_emiss, q_init, q_wm, 
+             c_trans, c_emiss, c_init, c_wm):
+    # Set up the generator.
+    poem = ''
+    syll_dict, stress_dict = load_syll_stress_dicts()
+    # Generate the quatrains.
+    for q in range(NUM_QUATRAINS):
+        q_state = None
+        quatrain = ''
+        for line in range(QUATRAIN_LINES):
+            q_line, q_state = gen_txt(q_trans, q_emiss, q_init, q_wm,
+                                      syll_dict, stress_dict, 
+                                      curr_state=q_state)
+            poem += q_line + '\n'
+    # Generate the final couplet.
+    c_state = None
+    for line in range(COUPLET_LINES):
+        c_line, c_state = gen_txt(c_trans, c_emiss, c_init, c_wm,
+                                   syll_dict, stress_dict,
+                                   curr_state=c_state)
+        poem += c_line + '\n'
+    return poem
+
+def gen_poem_rhyme(trans, emiss, wm, iwm):
+    # Set up generator and important dictionaries.
+    poem = ''
+    syll_dict, stress_dict = load_syll_stress_dicts()
+    q_rhyme, c_rhyme = gen_rhyme_lists()
+    # Generate the quatrains.
+    for q in range(NUM_QUATRAINS):
+        rhymes = np.random.choice(len(q_rhyme), 2)
+        end0 = q_rhyme[rhymes[0]][0]
+        end1 = q_rhyme[rhymes[1]][0]
+        end2 = q_rhyme[rhymes[0]][1]
+        end3 = q_rhyme[rhymes[1]][1]
+        
+        qline0 = gen_txt_rhyme2(trans, emiss, iwm, wm, 
+                               syll_dict, stress_dict, end0)
+        qline1 = gen_txt_rhyme2(trans, emiss, iwm, wm, 
+                               syll_dict, stress_dict, end1)
+        qline2 = gen_txt_rhyme2(trans, emiss, iwm, wm, 
+                               syll_dict, stress_dict, end2)
+        qline3 = gen_txt_rhyme2(trans, emiss, iwm, wm, 
+                               syll_dict, stress_dict, end3)
+        poem += qline0 + '\n' + qline1 + '\n' + qline2 + '\n' + qline3 + '\n'
+    # Generate the couplet.
+    rhymes = np.random.choice(len(c_rhyme))
+    end0 = c_rhyme[rhymes][0]
+    end1 = c_rhyme[rhymes][1]
+    cline0 = gen_txt_rhyme2(trans, emiss, iwm, wm, 
+                            syll_dict, stress_dict, end0)
+    cline1 = gen_txt_rhyme2(trans, emiss, iwm, wm, 
+                            syll_dict, stress_dict, end1)
+    poem += cline0 + '\n' + cline1 + '\n'
+    return poem
     
 # ----------------------------------------------------------------------
 # Save/Load trained models.
