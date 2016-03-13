@@ -144,6 +144,23 @@ def shksp_quatrain_couplets_line(tokenizer, filename='shakespeare.txt'):
             cursor += 1
     return quatrains, couplets
     
+def gen_count_dict(tokenizer=simple_token2, filename='shakespeare.txt'):
+    raw = shksp_raw(filename)
+    count_dict = {}
+    cursor = 0
+    for sonnet in range(NUM_SHKSP_SONNETS):
+        # Skip first line which is a number.
+        cursor += 1
+        for i in range(SONNET_LINES):
+            words = tokenizer(raw[cursor])
+            for word in words:
+                if count_dict.get(word) is not None:
+                    count_dict[word] += 1
+                else:
+                    count_dict[word] = 1
+            cursor += 1
+    return count_dict
+    
 def gen_rhyme_lists(filename='shakespeare.txt'):
     raw = shksp_raw(filename)
     quatrains_rhymes = []
