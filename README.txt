@@ -23,8 +23,11 @@ Train Model and Save:
     train_model("Model_name", 20, data)
 
 Visualization:
-
-
+    from hmm_helper import *
+    trans, emiss, wordmap, init = load_model("Model_name")
+    count = gen_count_dict()
+    clean_print_top(find_best(emiss, wordmap, count))
+    clean_print_trans(trans_max(trans))
 
 Poem Generation:
     from poem_gen import *
