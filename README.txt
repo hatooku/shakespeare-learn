@@ -27,3 +27,8 @@ Visualization:
 
 
 Poem Generation:
+    from poem_gen import *
+    # Generate unrhymed, but stressed poems:
+    poem1 = gpoem_qac_models("Model_name")
+    # Generate ryhmed but unstressed poems:
+    poem 2 = gpoem_rev_models("Model_name")
