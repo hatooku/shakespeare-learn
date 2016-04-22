@@ -1,3 +1,5 @@
+This program utilizes Hidden Markov Models to generate random Shakespeare-esque sonnets.
+
 HMM, Poem Generation, and Visualization Instructions
 ----------------------------------------------------
 
